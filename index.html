@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>铁甲营救 - demo</title>
+<style>
+  html, body {
+    margin: 0; padding: 0; width: 100%; height: 100%;
+    overflow: hidden; background: #1a2415;
+    touch-action: none; -webkit-user-select: none; user-select: none;
+    -webkit-tap-highlight-color: transparent;
+    font-family: "PingFang SC", "Microsoft YaHei", sans-serif;
+  }
+  #game { display: block; width: 100vw; height: 100vh; }
+</style>
+</head>
+<body>
+<div id="bootmsg" style="position:fixed;inset:0;display:flex;align-items:center;justify-content:center;color:#fff;background:#1a2415;font-size:17px;text-align:center;padding:30px;z-index:99;">正在启动游戏…</div>
+<canvas id="game"></canvas>
+<script src="js/polyfill.js"></script>
+<script src="js/config.js"></script>
+<script src="js/input.js"></script>
+<script src="js/audio.js"></script>
+<script src="js/effects.js"></script>
+<script src="js/entities.js"></script>
+<script src="js/level.js"></script>
+<script src="js/main.js"></script>
+</body>
+</html>
