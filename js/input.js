@@ -1,85 +1,100 @@
-// 输入抽象：键盘(WASD/方向键+空格手雷) + 触屏(左半屏动态摇杆+右下手雷按钮)
-// 对外暴露: Input.mx, Input.my (-1..1 移动向量), Input.grenade (按下即true, 消费制),
-// Input.anyTap {x,y} (点击, 用于UI按钮), Input.pausePressed, Input.mutePressed
-// 微信小游戏移植: 把 touchstart/move/end 换成 wx.onTouchStart 等, 逻辑不变。
+// ===== 输入: 左摇杆移动 + 右开火键 + 右手雷键 =====
 const Input = {
-  mx: 0, my: 0, grenade: false,
-  taps: [], pausePressed: false, mutePressed: false,
-  _keys: {}, _joyId: null, _joyOX: 0, _joyOY: 0, _joyDX: 0, _joyDY: 0,
-  _grenadeBtn: { x: 0, y: 0, r: 46 },
+  _keys: {}, taps: [],
+  joy: { active: false, id: -1, ox: 0, oy: 0, dx: 0, dy: 0 },
+  fire: false,            // 开火键是否按住(触屏按钮 / 空格)
+  _fireId: -1,
+  _grenade: false,
+  _grenadeId: -1,
+  _fireBtn: null,         // {x,y,r} 逻辑坐标
+  _grenadeBtn: null,
 
   init(canvas) {
     this.canvas = canvas;
     window.addEventListener('keydown', e => {
-      if (e.repeat) return;
+      if (['Space','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.code)) e.preventDefault();
+      if (e.code === 'Space') this.fire = true;
+      if ((e.code === 'KeyQ' || e.code === 'KeyE') && !e.repeat) this._grenade = true;
       this._keys[e.code] = true;
-      if (e.code === 'Space') this.grenade = true;
-      if (e.code === 'KeyP') this.pausePressed = true;
-      if (e.code === 'KeyM') this.mutePressed = true;
-      if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].includes(e.code)) e.preventDefault();
     });
-    window.addEventListener('keyup', e => { this._keys[e.code] = false; });
-
-    const pos = t => {
+    window.addEventListener('keyup', e => {
+      if (e.code === 'Space') this.fire = false;
+      this._keys[e.code] = false;
+    });
+    const pos = (t) => {
       const r = canvas.getBoundingClientRect();
-      return { x: t.clientX - r.left, y: t.clientY - r.top };
+      return { x: (t.clientX - r.left) / r.width * G.vw, y: (t.clientY - r.top) / r.height * G.vh };
+    };
+    const onBtn = (p, id) => {
+      const f = this._fireBtn, g = this._grenadeBtn;
+      if (f && Math.hypot(p.x - f.x, p.y - f.y) <= f.r + 14) { this.fire = true; this._fireId = id; return true; }
+      if (g && Math.hypot(p.x - g.x, p.y - g.y) <= g.r + 14) { this._grenade = true; this._grenadeId = id; return true; }
+      return false;
     };
     canvas.addEventListener('touchstart', e => {
       e.preventDefault();
       for (const t of e.changedTouches) {
         const p = pos(t);
-        // 右下手雷按钮
-        const g = this._grenadeBtn;
-        if (Math.hypot(p.x - g.x, p.y - g.y) < g.r + 14) { this.grenade = true; continue; }
-        // 左半屏: 动态摇杆
-        if (p.x < canvas.width / (window.devicePixelRatio || 1) / 2 && this._joyId === null) {
-          this._joyId = t.identifier; this._joyOX = p.x; this._joyOY = p.y;
-          this._joyDX = 0; this._joyDY = 0;
+        if (onBtn(p, t.identifier)) continue;
+        if (!this.joy.active && p.x < G.vw * 0.5) {
+          this.joy.active = true; this.joy.id = t.identifier;
+          this.joy.ox = p.x; this.joy.oy = p.y; this.joy.dx = 0; this.joy.dy = 0;
         } else {
-          this.taps.push(p); // 其余触摸视为UI点击
+          this.taps.push(p); // 标题画面点选
         }
       }
     }, { passive: false });
     canvas.addEventListener('touchmove', e => {
       e.preventDefault();
       for (const t of e.changedTouches) {
-        if (t.identifier === this._joyId) {
+        if (this.joy.active && t.identifier === this.joy.id) {
           const p = pos(t);
-          const R = 60, dx = p.x - this._joyOX, dy = p.y - this._joyOY;
-          const d = Math.hypot(dx, dy) || 1, cl = Math.min(d, R);
-          this._joyDX = dx / d * cl / R; this._joyDY = dy / d * cl / R;
+          let dx = p.x - this.joy.ox, dy = p.y - this.joy.oy;
+          const len = Math.hypot(dx, dy), max = 62;
+          if (len > max) { dx = dx / len * max; dy = dy / len * max; }
+          this.joy.dx = dx / max; this.joy.dy = dy / max;
         }
       }
     }, { passive: false });
     const endT = e => {
-      for (const t of e.changedTouches)
-        if (t.identifier === this._joyId) { this._joyId = null; this._joyDX = 0; this._joyDY = 0; }
+      for (const t of e.changedTouches) {
+        if (this.joy.active && t.identifier === this.joy.id) {
+          this.joy.active = false; this.joy.dx = 0; this.joy.dy = 0;
+        }
+        if (t.identifier === this._fireId) { this.fire = false; this._fireId = -1; }
+        if (t.identifier === this._grenadeId) { this._grenadeId = -1; }
+      }
     };
     canvas.addEventListener('touchend', endT);
     canvas.addEventListener('touchcancel', endT);
+    // 桌面鼠标点按钮
     canvas.addEventListener('mousedown', e => {
-      const r = canvas.getBoundingClientRect();
-      const p = { x: e.clientX - r.left, y: e.clientY - r.top };
-      const g = this._grenadeBtn;
-      if (Math.hypot(p.x - g.x, p.y - g.y) < g.r + 14) this.grenade = true;
-      else this.taps.push(p);
+      const p = pos(e);
+      if (!onBtn(p, 'mouse')) this.taps.push(p);
     });
+    canvas.addEventListener('mouseup', () => { if (this._fireId === 'mouse') { this.fire = false; this._fireId = -1; } });
   },
 
-  // 每帧调用: 汇总键盘+摇杆
-  poll() {
-    let x = 0, y = 0;
+  // 移动向量: 键盘优先, 否则摇杆
+  moveVec() {
     const k = this._keys;
+    let x = 0, y = 0;
     if (k['KeyA'] || k['ArrowLeft']) x -= 1;
     if (k['KeyD'] || k['ArrowRight']) x += 1;
     if (k['KeyW'] || k['ArrowUp']) y -= 1;
     if (k['KeyS'] || k['ArrowDown']) y += 1;
-    if (this._joyId !== null) { x = this._joyDX; y = this._joyDY; }
-    const d = Math.hypot(x, y);
-    if (d > 1) { x /= d; y /= d; }
-    this.mx = x; this.my = y;
+    if (x || y) { const l = Math.hypot(x, y); return { x: x / l, y: y / l }; }
+    if (this.joy.active) {
+      const dx = this.joy.dx, dy = this.joy.dy, l = Math.hypot(dx, dy);
+      if (l > 0.18) return { x: dx / l, y: dy / l };
+    }
+    return null;
   },
-
+  consumeGrenade() { const g = this._grenade; this._grenade = false; return g; },
   consumeTap() { return this.taps.shift(); },
-  clearFrame() { this.taps.length = 0; this.pausePressed = false; this.mutePressed = false; },
+  reset() {
+    this.taps.length = 0; this.fire = false; this._grenade = false;
+    this.joy.active = false; this.joy.dx = 0; this.joy.dy = 0;
+    this._fireId = -1; this._grenadeId = -1;
+  }
 };
