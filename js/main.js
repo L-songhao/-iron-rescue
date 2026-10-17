@@ -46,6 +46,7 @@ const G = {
 
   startGame() {
     this.player = new Player(CFG.world.w / 2, CFG.world.h - 320);
+    this.player.invuln = CFG.tuning.spawnProtect; // 开局3秒无敌(新手保护, 闪烁提示)
     this.enemies = []; this.buildings = []; this.pows = []; this.pickups = [];
     this.pBullets = []; this.eBullets = []; this.grenades = [];
     this.particles = []; this.floatTexts = [];

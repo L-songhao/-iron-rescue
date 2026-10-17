@@ -14,10 +14,44 @@ const Assets = {
     const finish = () => { if (++done === names.length) { this.ready = true; this._buildSkinVariants(); onDone(); } };
     for (const name of names) {
       const img = new Image();
-      img.onload = () => { this.imgs[name] = img; finish(); };
+      img.onload = () => { this.imgs[name] = Assets._keyOutWhite(img); finish(); };
       img.onerror = () => { this.imgs[name] = null; finish(); };
       img.src = (window.__ASSET_DATA && window.__ASSET_DATA[name]) || ('assets/' + name + '.png');
     }
+  },
+  // 白底抠除: 部分素材(如军营/碉堡/玩家吉普)背景为不透明白色, 加载时做一次
+  // 边缘泛洪抠除(已带透明通道的素材不受影响)。运行时一次性成本, 绘制零成本。
+  _keyOutWhite(img) {
+    try {
+      const w = img.naturalWidth, h = img.naturalHeight;
+      if (!w || !h) return img;
+      const c = document.createElement('canvas');
+      c.width = w; c.height = h;
+      const g = c.getContext('2d');
+      g.drawImage(img, 0, 0);
+      const d = g.getImageData(0, 0, w, h), px = d.data;
+      const seen = new Uint8Array(w * h), stack = [];
+      for (let x = 0; x < w; x++) { stack.push(x); stack.push(x + (h - 1) * w); }
+      for (let y = 0; y < h; y++) { stack.push(y * w); stack.push(w - 1 + y * w); }
+      while (stack.length) {
+        const i = stack.pop();
+        if (seen[i]) continue;
+        seen[i] = 1;
+        const o = i * 4;
+        if (px[o] >= 240 && px[o + 1] >= 240 && px[o + 2] >= 240) {
+          px[o + 3] = 0;
+          const x = i % w, y = (i / w) | 0;
+          if (x > 0) stack.push(i - 1);
+          if (x < w - 1) stack.push(i + 1);
+          if (y > 0) stack.push(i - w);
+          if (y < h - 1) stack.push(i + w);
+        }
+      }
+      g.putImageData(d, 0, 0);
+      const out = new Image();
+      out.src = c.toDataURL();
+      return out;
+    } catch (e) { return img; }
   },
   // 皮肤换色: 对俯视图同样用滤镜变体, 运行时零成本
   _buildSkinVariants() {
@@ -455,12 +489,13 @@ class Enemy {
       this.x += Math.cos(a) * this.speed * dt;
       this.y += Math.sin(a) * this.speed * dt;
     }
-    // 开火
+    // 开火(新手期缓坡: 前60秒开火频率与伤害×0.7; Boss不受影响)
     this.fireT -= dt;
     if (this.fireT <= 0 && d < 620 && this.type !== 'golden') {
-      this.fireT = this.fireCd * (0.8 + Math.random() * 0.4);
+      const T = CFG.tuning, ramp = (game.time || 0) < T.rampTime ? T.rampMul : 1;
+      this.fireT = this.fireCd * (0.8 + Math.random() * 0.4) / ramp;
       const a = Math.atan2(dy, dx);
-      game.eBullets.push(new EnemyBullet(this.x, this.y, a, 320, this.dmg));
+      game.eBullets.push(new EnemyBullet(this.x, this.y, a, T.enemyBulletSpeed, Math.round(this.dmg * ramp)));
       SFX.enemyShoot();
     }
     // 接触伤害

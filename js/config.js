@@ -27,4 +27,11 @@ const CFG = {
     { id: 'navy',   name: '深海幽灵', filter: 'hue-rotate(155deg) saturate(1.35)', price: 8000,  desc: '深海蓝涂装' },
   ],
   feel: { shakeOnExplode: 0.32 },
+  // 难度调校(2026-10-17): 新手保护 + 前期缓坡, Boss压迫感保留
+  tuning: {
+    spawnProtect: 3,      // 开局无敌秒数(受伤闪烁提示)
+    rampTime: 60,         // 前60秒为新手期
+    rampMul: 0.7,         // 新手期: 敌人开火频率×0.7、子弹伤害×0.7(约降30%)
+    enemyBulletSpeed: 280 // 普通敌人子弹速度(原320, 降12.5%); Boss子弹速度不变
+  },
 };

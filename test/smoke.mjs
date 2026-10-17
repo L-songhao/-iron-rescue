@@ -232,4 +232,40 @@ console.log('— 回归 —');
   ok(g.buildings.some(b => b.powerup), '机枪升级建筑保留');
 }
 
+// ================= 难度调校(2026-10-17) =================
+console.log('— 难度调校 —');
+{
+  // 开局无敌: startGame 逻辑等价(invuln=3), 受伤不掉血
+  const g = fakeGame(); const p = withPlayer(g);
+  p.invuln = CFG.tuning.spawnProtect;
+  p.hurt(50, g);
+  ok(p.hp === CFG.player.hp && p.invuln === 3, '开局3秒无敌: 受伤不掉血');
+  p.update(3.1, g);
+  p.hurt(50, g);
+  ok(p.hp === CFG.player.hp - 50, '无敌结束后受伤正常掉血');
+}
+{
+  // 新手期缓坡: 前60秒开火频率×0.7、子弹伤害×0.7、子弹速度280
+  const g = fakeGame(); withPlayer(g, 800, 3000); g.time = 0;
+  const e = new Enemy(800, 2800, 'tank'); g.enemies.push(e); // dmg 14
+  e.fireT = 0; e.update(0.02, g);
+  ok(g.eBullets.length === 1, '新手期敌人仍会开火');
+  const b = g.eBullets[0];
+  const sp = Math.hypot(b.vx, b.vy);
+  ok(Math.round(b.dmg) === Math.round(14 * CFG.tuning.rampMul) && Math.abs(sp - CFG.tuning.enemyBulletSpeed) < 1,
+    `新手期子弹伤害×0.7(${b.dmg})、速度${CFG.tuning.enemyBulletSpeed}`);
+  // 开火间隔拉长: fireCd 2.6 / 0.7 ≈ 3.7秒起
+  ok(e.fireT > 2.6, `新手期开火间隔拉长(${e.fireT.toFixed(2)}s > 2.6s)`);
+  // 60秒后恢复全额
+  const g2 = fakeGame(); withPlayer(g2, 800, 3000); g2.time = 61;
+  const e2 = new Enemy(800, 2800, 'tank'); g2.enemies.push(e2);
+  e2.fireT = 0; e2.update(0.02, g2);
+  ok(g2.eBullets[0].dmg === 14, '60秒后子弹伤害恢复全额');
+  // Boss 不受缓坡影响(压迫感保留)
+  const g3 = fakeGame(); withPlayer(g3, 800, 900); g3.time = 0;
+  const boss = new Boss(800, 380); g3.boss = boss;
+  boss.fireT = 0.01; boss.update(0.02, g3);
+  ok(g3.eBullets[0].dmg === 14, 'Boss子弹伤害不受新手期影响');
+}
+
 console.log(`\n全部 ${n} 项通过 ✅`);
