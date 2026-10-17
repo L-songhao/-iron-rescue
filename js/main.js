@@ -105,7 +105,12 @@ const G = {
     FX.hitStop(0.35); FX.addShake(0.55); FX.screenFlash();
     SFX.bossDown();
     this.addScore(CFG.score.boss, b.x, b.y - 60);
-    this.banner('Boss 击毁!', 2);
+    // 掉落战俘(1个闪烁)
+    for (let i = 0; i < 3; i++) {
+      const a = Math.random() * Math.PI * 2;
+      this.pows.push(new POW(b.x + Math.cos(a) * 80, b.y + Math.sin(a) * 80, { flashing: i === 0 }));
+    }
+    this.banner('Boss 击毁！战俘获救！', 2.4);
   },
   onPlayerDead() {
     FX.explosion(this.player.x, this.player.y, 1.6);
@@ -249,8 +254,14 @@ const G = {
     ctx.font = 'bold 22px sans-serif';
     ctx.fillStyle = '#7dff8a';
     ctx.fillText('战俘 ' + p.aboard + '/' + p.aboardMax, 16, 68);
+    // 投掷武器: 名称 + 等级点 + 弹药(升级后无限)
+    const wn = CFG.weapons[p.grenadeLevel].name;
     ctx.fillStyle = '#ffd94d';
-    ctx.fillText('💣×' + p.grenades, 16, 98);
+    ctx.fillText('🚀' + wn + (p.grenadeLevel > 0 ? ' ∞' : '×' + p.grenades), 16, 98);
+    for (let i = 0; i < 4; i++) {
+      ctx.fillStyle = i <= p.grenadeLevel ? '#ffd94d' : 'rgba(255,255,255,.25)';
+      ctx.beginPath(); ctx.arc(196 + i * 20, 92, 6, 0, 7); ctx.fill();
+    }
     ctx.textAlign = 'right'; ctx.fillStyle = '#fff';
     ctx.fillText(this.score + ' 分', this.vw - 16, 36);
     ctx.font = '18px sans-serif'; ctx.fillStyle = 'rgba(255,255,255,.75)';
@@ -262,11 +273,15 @@ const G = {
     const b = this.boss, w = Math.min(560, this.vw - 80), x = (this.vw - w) / 2, y = this.vh - 36;
     ctx.fillStyle = 'rgba(0,0,0,.55)';
     ctx.beginPath(); ctx.roundRect(x, y, w, 18, 9); ctx.fill();
-    ctx.fillStyle = '#c0392b';
+    ctx.fillStyle = b.phase === 3 ? '#ff3b30' : b.phase === 2 ? '#ff9a3c' : '#c0392b';
     const k = Math.max(0, b.hp / b.maxHp);
     if (k > 0) { ctx.beginPath(); ctx.roundRect(x, y, w * k, 18, 9); ctx.fill(); }
+    // 阶段刻度(66%/33%)
+    ctx.fillStyle = 'rgba(255,255,255,.8)';
+    ctx.fillRect(x + w * 0.66 - 1, y - 3, 2, 24);
+    ctx.fillRect(x + w * 0.33 - 1, y - 3, 2, 24);
     ctx.fillStyle = '#fff'; ctx.font = 'bold 16px sans-serif'; ctx.textAlign = 'center';
-    ctx.fillText('重型坦克', this.vw / 2, y - 6);
+    ctx.fillText('重型坦克 · P' + b.phase, this.vw / 2, y - 6);
     ctx.textAlign = 'left';
   },
 
@@ -279,16 +294,17 @@ const G = {
     ctx.globalAlpha = 1;
     ctx.fillStyle = '#fff'; ctx.font = 'bold 26px sans-serif'; ctx.textAlign = 'center';
     ctx.fillText('开火', f.x, f.y + 9);
-    // 手雷键
+    // 手雷键(投掷武器: L0耗弹药 / L1+无限)
     const gr = Input._grenadeBtn, p = this.player;
+    const hasAmmo = p.grenades > 0 || p.grenadeLevel > 0;
     ctx.globalAlpha = 0.55;
-    ctx.fillStyle = p.grenades > 0 ? '#e67e22' : '#555';
+    ctx.fillStyle = hasAmmo ? '#e67e22' : '#555';
     ctx.beginPath(); ctx.arc(gr.x, gr.y, gr.r, 0, 7); ctx.fill();
     ctx.globalAlpha = 1;
     ctx.fillStyle = '#fff'; ctx.font = 'bold 20px sans-serif';
     ctx.fillText('💣', gr.x, gr.y + 2);
     ctx.font = 'bold 16px sans-serif';
-    ctx.fillText('×' + p.grenades, gr.x, gr.y + 26);
+    ctx.fillText(p.grenadeLevel > 0 ? '∞' : '×' + p.grenades, gr.x, gr.y + 26);
     // 摇杆
     const j = Input.joy;
     if (j.active) {

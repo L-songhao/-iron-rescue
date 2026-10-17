@@ -38,9 +38,9 @@ const Level = {
 
     // --- 建筑布局 (x, y, type, opts) ---
     const B = [
-      [400, 3200, 'barracks'], [1150, 3050, 'bunker'], [800, 2780, 'depot'],
+      [400, 3200, 'barracks', { flashPow: true }], [1150, 3050, 'bunker'], [800, 2780, 'depot'],
       [350, 2480, 'bunker'], [1200, 2330, 'barracks', { powerup: true }], [650, 2030, 'barracks'],
-      [1050, 1730, 'bunker'], [450, 1430, 'depot'], [950, 1130, 'barracks'], [1300, 880, 'bunker'],
+      [1050, 1730, 'bunker', { flashPow: true }], [450, 1430, 'depot'], [950, 1130, 'barracks'], [1300, 880, 'bunker'],
     ];
     game.buildings = B.map(([x, y, t, o]) => new Building(x, y, t, o));
 

@@ -81,6 +81,8 @@ class Player {
     this.fireCd = 0; this.grenades = P.grenades;
     this.aboard = 0; this.aboardMax = P.aboardMax;
     this.weapon = 0;             // 0=机枪 1=三向散射
+    this.grenadeLevel = 0;       // 投掷武器等级: 0手雷 1火箭筒 2远程导弹 3散射导弹
+    this.rescueCount = 0;        // 累计救人(升级计数用)
     this.invuln = 0; this.hitCd = 0;
     this.moving = false;
     this._dustT = 0;
@@ -115,15 +117,39 @@ class Player {
     // 手动机枪: 按住开火键
     this.fireCd -= dt;
     if (Input.fire && this.fireCd <= 0) { this.shoot(game); this.fireCd = 1 / CFG.player.mgRate; }
-    // 手雷
-    if (Input.consumeGrenade() && this.grenades > 0) {
-      this.grenades--;
-      const range = 300;
-      game.grenades.push(new Grenade(this.x, this.y, this.angle, range));
-      SFX.throw_();
-    }
+    // 投掷武器: L0手雷(耗弹药) / L1+火箭筒系(无限, 升级奖励)
+    if (Input.consumeGrenade()) this.fireShell(game);
     if (this.invuln > 0) this.invuln -= dt;
     if (this.hitCd > 0) this.hitCd -= dt;
+  }
+  fireShell(game) {
+    const W = CFG.weapons[this.grenadeLevel], n = this.nose();
+    if (this.grenadeLevel === 0) {
+      if (this.grenades <= 0) { SFX.denied(); return; }
+      this.grenades--;
+      game.grenades.push(new Grenade(this.x, this.y, this.angle, W.range));
+    } else if (W.spread) {
+      for (let i = -1; i <= 1; i++)
+        game.grenades.push(new Shell(n.x, n.y, this.angle + i * 0.17, this.grenadeLevel));
+    } else {
+      game.grenades.push(new Shell(n.x, n.y, this.angle, this.grenadeLevel));
+    }
+    if (this.grenadeLevel > 0) SFX.rocket(); else SFX.throw_();
+    FX.muzzle(n.x, n.y, this.angle);
+  }
+  upgradeWeapon(game) {
+    if (this.grenadeLevel >= CFG.weapons.length - 1) {
+      game.addScore(500, this.x, this.y - 30);
+      game.floatTexts.push(new FloatText(this.x, this.y - 46, '武器已满级 +500', '#ffd94d', 20));
+      return;
+    }
+    this.grenadeLevel++;
+    const name = CFG.weapons[this.grenadeLevel].name;
+    game.banner('武器升级：' + name + '！', 2.2);
+    game.floatTexts.push(new FloatText(this.x, this.y - 44, '⬆ ' + name, '#ffd94d', 24));
+    FX.sparkle(this.x, this.y);
+    FX.screenFlash();
+    SFX.upgrade();
   }
   shoot(game) {
     const n = this.nose(), dmg = CFG.player.mgDmg;
@@ -230,6 +256,62 @@ class Grenade {
   }
 }
 
+// ---------- 火箭筒/导弹: 直线高速飞行, 尾焰曳光, 撞击或到射程即炸 ----------
+class Shell {
+  constructor(x, y, angle, level) {
+    const W = CFG.weapons[level];
+    this.x = x; this.y = y; this.angle = angle; this.level = level;
+    this.speed = W.speed; this.range = W.range;
+    this.dmg = W.dmg; this.radius = W.radius; this.color = W.color;
+    this.traveled = 0; this._trail = 0;
+  }
+  _boom(game) {
+    const W = CFG.weapons[this.level];
+    game.explode(this.x, this.y, this.radius, this.dmg, true);
+    FX.addShake(W.shake);
+    FX.hitStop(0.05);
+  }
+  update(dt, game) {
+    const step = this.speed * dt;
+    this.x += Math.cos(this.angle) * step;
+    this.y += Math.sin(this.angle) * step;
+    this.traveled += step;
+    // 尾焰曳光
+    this._trail -= dt;
+    if (this._trail <= 0) {
+      this._trail = 0.016;
+      FX.spawn(this.x - Math.cos(this.angle) * 16, this.y - Math.sin(this.angle) * 16,
+        (Math.random() - 0.5) * 70, (Math.random() - 0.5) * 70, 0.22, 4, this.color, 0, 2);
+    }
+    if (this.traveled >= this.range) { this._boom(game); return false; }
+    // 撞击提前引爆
+    for (const b of game.buildings) {
+      if (b.hp > 0 && Math.hypot(this.x - b.x, this.y - b.y) < b.r) { this._boom(game); return false; }
+    }
+    for (const e of [...game.enemies]) {
+      if (Math.hypot(this.x - e.x, this.y - e.y) < e.r + 6) { this._boom(game); return false; }
+    }
+    if (game.boss && !game.boss.dead && Math.hypot(this.x - game.boss.x, this.y - game.boss.y) < game.boss.r) {
+      this._boom(game); return false;
+    }
+    return true;
+  }
+  draw(ctx) {
+    const bx = this.x - Math.cos(this.angle) * 16, by = this.y - Math.sin(this.angle) * 16;
+    // 火焰
+    ctx.fillStyle = 'rgba(255,180,80,.85)';
+    ctx.beginPath(); ctx.arc(bx, by, 7 + Math.random() * 4, 0, 7); ctx.fill();
+    // 弹体
+    ctx.save();
+    ctx.translate(this.x, this.y); ctx.rotate(this.angle);
+    ctx.fillStyle = this.color;
+    ctx.beginPath(); ctx.roundRect(-14, -4, 26, 8, 4); ctx.fill();
+    ctx.fillStyle = '#fff';
+    ctx.beginPath(); ctx.roundRect(8, -4, 6, 8, 3); ctx.fill(); // 弹头
+    ctx.restore();
+  }
+}
+
 // ---------- 建筑: 打烂放出战俘 ----------
 class Building {
   constructor(x, y, type, opts = {}) {
@@ -238,7 +320,8 @@ class Building {
     this.maxHp = this.hp;
     this.r = { bunker: 48, barracks: 54, depot: 58 }[type];
     this.powCount = { bunker: 2, barracks: 3, depot: 1 }[type];
-    this.powerup = !!opts.powerup;   // 打烂掉武器升级
+    this.powerup = !!opts.powerup;   // 打烂掉武器升级(机枪散射)
+    this.flashPow = !!opts.flashPow; // 打烂放出"闪烁战俘"(投掷武器升级)
     this.flash = 0;
     this.img = Assets.imgs[type];
   }
@@ -249,13 +332,15 @@ class Building {
     if (this.hp <= 0) this.destroy(game);
   }
   destroy(game) {
+    if (this._destroyed) return; // 幂等: 爆炸连锁可能重复触发
+    this._destroyed = true;
     game.addScore(CFG.score.building, this.x, this.y);
     const big = this.type === 'depot';
     game.explode(this.x, this.y, big ? 190 : 140, big ? 160 : 90, true);
-    // 放出战俘
+    // 放出战俘(闪烁建筑放出闪烁战俘)
     for (let i = 0; i < this.powCount; i++) {
       const a = Math.random() * Math.PI * 2, d = 30 + Math.random() * 30;
-      game.pows.push(new POW(this.x + Math.cos(a) * d, this.y + Math.sin(a) * d));
+      game.pows.push(new POW(this.x + Math.cos(a) * d, this.y + Math.sin(a) * d, { flashing: this.flashPow }));
     }
     if (this.powerup) game.pickups.push(new Pickup(this.x, this.y, 'weapon'));
     SFX.buildingDown();
@@ -277,12 +362,13 @@ class Building {
   }
 }
 
-// ---------- 战俘: 挥手 → 跑向吉普 → 上车 ----------
+// ---------- 战俘: 挥手 → 跑向吉普 → 上车(闪烁战俘给武器升级) ----------
 class POW {
-  constructor(x, y) {
+  constructor(x, y, opts = {}) {
     this.x = x; this.y = y;
     this.state = 'wave';   // wave | toJeep | aboard
     this.t = Math.random() * 10;
+    this.flashing = !!opts.flashing; // 闪烁战俘: 上车即升级投掷武器
     this.img = Assets.imgs['pow'];
   }
   update(dt, game) {
@@ -296,9 +382,12 @@ class POW {
         if (p.aboard < p.aboardMax) {
           this.state = 'aboard';
           p.aboard++;
+          p.rescueCount++;
           game.addScore(CFG.score.pow, this.x, this.y - 20);
           game.floatTexts.push(new FloatText(this.x, this.y - 30, '战俘+1', '#7dff8a', 20));
           SFX.rescue();
+          // 升级: 闪烁战俘直接升 / 每救满N人升1级
+          if (this.flashing || p.rescueCount % CFG.rescuePerUpgrade === 0) p.upgradeWeapon(game);
         }
         // 车满了就继续跟着跑
       } else {
@@ -313,8 +402,14 @@ class POW {
     const bob = Math.sin(this.t * 8) * 3;
     drawShadow(ctx, this.x, this.y, 10);
     const s = 30, img = this.img;
+    ctx.save();
+    if (this.flashing) { // 闪烁战俘: 金色光晕+闪烁, 一眼可辨
+      ctx.shadowColor = '#ffd94d'; ctx.shadowBlur = 20;
+      ctx.globalAlpha = 0.72 + 0.28 * Math.sin(this.t * 10);
+    }
     if (img && img.complete && img.naturalWidth) ctx.drawImage(img, this.x - s / 2, this.y - s / 2 + bob * 0.4, s, s);
     else { ctx.fillStyle = '#c9a06a'; ctx.beginPath(); ctx.arc(this.x, this.y + bob * 0.4, 11, 0, 7); ctx.fill(); }
+    ctx.restore();
     if (this.state === 'wave') { // 挥手提示
       ctx.font = 'bold 20px sans-serif'; ctx.textAlign = 'center';
       const w = Math.sin(this.t * 6) > 0 ? '👋' : '✋';
@@ -411,13 +506,18 @@ class Enemy {
   }
 }
 
-// ---------- Boss: 重型坦克 ----------
+// ---------- Boss: 重型坦克 · 三阶段 ----------
+// P1 常规(移动+单发炮击) → P2 狂暴(<66%: 加速+双发扇形) → P3 残血(<33%: 召唤小怪+冲撞)
 class Boss {
   constructor(x, y) {
     this.x = x; this.y = y;
-    this.hp = this.maxHp = 700; this.r = 62;
+    this.hp = this.maxHp = 1500; this.r = 62;
     this.dead = false; this.flash = 0;
     this.fireT = 2; this.t = 0; this.dir = 1;
+    this.phase = 1;
+    this.volley = 0; this.volleyT = 0;   // P2双发扇形
+    this.minionT = 3; this.minionAlt = 0;// P3召唤
+    this.dashT = 4; this.telegraph = 0; this.dashing = 0; this.dashDx = 0; this.dashDy = 0; // P3冲撞
     this.img = Assets.imgs['boss-tank'];
   }
   takeDamage(dmg, game, hx, hy) {
@@ -425,29 +525,94 @@ class Boss {
     this.hp -= dmg; this.flash = 0.08;
     FX.sparks(hx, hy, 6);
     game.floatTexts.push(new FloatText(hx, hy - 16, '-' + Math.round(dmg), '#ffd94d', 19));
-    if (this.hp <= 0) game.killBoss();
+    if (this.hp <= 0) { game.killBoss(); return; }
+    const k = this.hp / this.maxHp;
+    if (this.phase === 1 && k < 0.66) this.enterPhase(2, game);
+    else if (this.phase === 2 && k < 0.33) this.enterPhase(3, game);
     else SFX.hitEnemy();
+  }
+  enterPhase(n, game) {
+    this.phase = n;
+    game.banner(n === 2 ? '⚠ Boss 狂暴化！' : '⚠ Boss 残血暴走！', 2.2);
+    FX.hitStop(0.3); FX.screenFlash(); FX.addShake(0.55);
+    FX.explosion(this.x, this.y, 1.2);
+    SFX.phaseShift();
+    if (n === 3) { this.minionT = 1.5; this.dashT = 2.5; }
+  }
+  _aimed(game, dmg, speed) {
+    const p = game.player, a = Math.atan2(p.y - this.y, p.x - this.x);
+    game.eBullets.push(new EnemyBullet(this.x, this.y, a, speed, dmg));
+    SFX.bossShoot();
+  }
+  _fan(game, n, spread, dmg, speed) {
+    const p = game.player, a = Math.atan2(p.y - this.y, p.x - this.x);
+    for (let i = 0; i < n; i++)
+      game.eBullets.push(new EnemyBullet(this.x, this.y, a + (i - (n - 1) / 2) * spread, speed, dmg));
+    SFX.bossShoot();
+    FX.addShake(0.18);
+  }
+  _spawnMinion(game) {
+    const alive = game.enemies.length;
+    if (alive >= 5) return;
+    const type = this.minionAlt % 2 === 0 ? 'scout' : 'jeep';
+    this.minionAlt++;
+    const a = Math.random() * Math.PI * 2;
+    game.enemies.push(new Enemy(this.x + Math.cos(a) * 90, this.y + Math.sin(a) * 90, type));
+    FX.sparkle(this.x, this.y);
+    game.floatTexts.push(new FloatText(this.x, this.y - 70, '敌军增援!', '#ff8a7d', 20));
   }
   update(dt, game) {
     if (this.dead) return;
     this.t += dt;
     if (this.flash > 0) this.flash -= dt;
-    // 缓慢横移
-    this.x += this.dir * 70 * dt;
+    const p = game.player;
+
+    // --- P3 冲撞: 预警 → 冲锋 ---
+    if (this.phase === 3) {
+      if (this.dashing > 0) {
+        this.dashing -= dt;
+        this.x += this.dashDx * 520 * dt; this.y += this.dashDy * 520 * dt;
+        this.x = Math.max(80, Math.min(CFG.world.w - 80, this.x));
+        this.y = Math.max(80, Math.min(CFG.world.h - 80, this.y));
+        if (Math.random() < 0.5) FX.puff(this.x, this.y + 30);
+        if (Math.hypot(p.x - this.x, p.y - this.y) < this.r + p.r) p.hurt(30, game);
+        return;
+      }
+      if (this.telegraph > 0) {
+        this.telegraph -= dt;
+        this.flash = 0.05;
+        if (this.telegraph <= 0) {
+          const a = Math.atan2(p.y - this.y, p.x - this.x);
+          this.dashDx = Math.cos(a); this.dashDy = Math.sin(a);
+          this.dashing = 0.55;
+          FX.addShake(0.4); SFX.bossShoot();
+        }
+        return;
+      }
+      this.dashT -= dt;
+      if (this.dashT <= 0) { this.dashT = 5; this.telegraph = 0.7; FX.addShake(0.25); SFX.bossWarn(); }
+      // P3 召唤小怪
+      this.minionT -= dt;
+      if (this.minionT <= 0) { this.minionT = 4.5; this._spawnMinion(game); }
+    }
+
+    // --- 移动(各阶段速度不同) ---
+    const spd = this.phase === 2 ? 140 : this.phase === 3 ? 100 : 70;
+    this.x += this.dir * spd * dt;
     if (this.x < 350) this.dir = 1;
     if (this.x > CFG.world.w - 350) this.dir = -1;
-    // 扇形炮击
+
+    // --- 开火 ---
     this.fireT -= dt;
-    if (this.fireT <= 0) {
-      this.fireT = 1.7;
-      const p = game.player, a = Math.atan2(p.y - this.y, p.x - this.x);
-      for (let i = -2; i <= 2; i++)
-        game.eBullets.push(new EnemyBullet(this.x, this.y, a + i * 0.16, 340, 14));
-      SFX.bossShoot();
-      FX.addShake(0.3);
+    if (this.volley > 0) { // P2第二发扇形(延迟)
+      this.volleyT -= dt;
+      if (this.volleyT <= 0) { this.volley--; this.volleyT = 0.3; this._fan(game, 3, 0.2, 13, 340); }
+    } else if (this.fireT <= 0) {
+      if (this.phase === 1) { this.fireT = 1.5; this._aimed(game, 14, 340); }
+      else if (this.phase === 2) { this.fireT = 1.3; this._fan(game, 3, 0.2, 13, 340); this.volley = 1; this.volleyT = 0.3; }
+      else { this.fireT = 1.1; this._fan(game, 4, 0.18, 12, 360); }
     }
-    const p = game.player;
-    if (Math.hypot(p.x - this.x, p.y - this.y) < this.r + p.r) p.hurt(25, game);
+    if (Math.hypot(p.x - this.x, p.y - this.y) < this.r + p.r && this.dashing <= 0) p.hurt(25, game);
   }
   draw(ctx) {
     if (this.dead) return;
@@ -455,6 +620,21 @@ class Boss {
     const s = this.r * 2.4, img = this.img;
     if (img && img.complete && img.naturalWidth) ctx.drawImage(img, this.x - s / 2, this.y - s / 2, s, s);
     else Fallback.tank(ctx, s, '#5a2d22');
+    // 阶段光环: P2橙 / P3红(脉冲)
+    if (this.phase > 1) {
+      const pulse = 0.5 + 0.3 * Math.sin(this.t * (this.phase === 3 ? 10 : 5));
+      ctx.save();
+      ctx.globalAlpha = pulse;
+      ctx.strokeStyle = this.phase === 2 ? '#ff9a3c' : '#ff3b30';
+      ctx.lineWidth = 6;
+      ctx.beginPath(); ctx.arc(this.x, this.y, this.r + 10, 0, 7); ctx.stroke();
+      ctx.restore();
+    }
+    // 阶段点(头顶)
+    for (let i = 0; i < 3; i++) {
+      ctx.fillStyle = i < this.phase ? '#ff5a4d' : 'rgba(255,255,255,.25)';
+      ctx.beginPath(); ctx.arc(this.x - 26 + i * 26, this.y - this.r - 22, 7, 0, 7); ctx.fill();
+    }
     if (this.flash > 0) {
       ctx.globalAlpha = Math.min(1, this.flash * 10);
       ctx.fillStyle = '#fff';
